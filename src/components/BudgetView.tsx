@@ -26,8 +26,6 @@ import {
   ChevronDown,
   Edit2
 } from 'lucide-react';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { convertCurrency, formatMoney, fetchLiveRates, getCachedRates, updateCustomRate } from '../services/currency';
 import { POPULAR_CURRENCIES } from '../services/storage';
@@ -37,6 +35,7 @@ import { MemberSettlementModal } from './MemberSettlementModal';
 import { AnimalAvatar } from './AnimalAvatar';
 import { CurrencyDropdown } from './CurrencyDropdown';
 import { ConfirmModal } from './ConfirmModal';
+import { CustomDatePicker } from './CustomDateTimePicker';
 
 interface BudgetViewProps {
   trip: Trip;
@@ -508,18 +507,10 @@ export const BudgetView: React.FC<BudgetViewProps> = ({ trip, onUpdateTrip }) =>
                       <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">
                         日期
                       </label>
-                      <DatePicker
-                        selected={date ? new Date(date) : null}
-                        onChange={(d) => {
-                          if (d) {
-                            const tzOffset = d.getTimezoneOffset() * 60000;
-                            const localISOTime = (new Date(d.getTime() - tzOffset)).toISOString().split('T')[0];
-                            setDate(localISOTime);
-                          }
-                        }}
-                        dateFormat="yyyy-MM-dd"
-                        placeholderText="選擇日期"
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-neutral-300 dark:border-neutral-600 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-neutral-900"
+                      <CustomDatePicker
+                        value={date}
+                        onChange={(newDate) => setDate(newDate)}
+                        placeholder="選擇日期"
                       />
                     </div>
                     <div>

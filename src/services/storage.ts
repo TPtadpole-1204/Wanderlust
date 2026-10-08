@@ -1,4 +1,4 @@
-import { Trip, CurrencyRate } from '../types';
+import type { Trip, CurrencyRate } from '../types.ts';
 
 export const DEFAULT_RATES: Record<string, number> = {
   // Base is TWD (New Taiwan Dollar)

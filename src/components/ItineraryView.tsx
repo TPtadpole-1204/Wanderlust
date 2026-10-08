@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import { Trip, DayPlan, ItineraryItem, PlaceCategory, TransportOption } from '../types';
+import { CustomDatePicker, CustomTimePicker } from './CustomDateTimePicker';
+import { AutocompleteInput } from './AutocompleteInput';
+import {
+  syncTripDatesAndDays,
+  updateDayDateAndCascade,
+  addDayToTrip,
+  removeDayFromTrip,
+  moveItineraryItemOrder,
+  getDurationMins,
+  addMinsToTime,
+} from '../services/itineraryUtils';
 import {  
   Plus, 
   Trash2, 
@@ -83,7 +92,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   ) || [];
 
   // Weather state
-  const [weatherData, setWeatherData] = useState<TripWeatherData | null>(() => getCachedTripWeather(trip.id));
+  const [weatherData, setWeatherData] = useState<TripWeatherData | null>(() => getCachedTripWeather(trip.id, trip.destination));
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [showWeatherModal, setShowWeatherModal] = useState(false);
 
@@ -92,8 +101,8 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
   React.useEffect(() => {
     let isMounted = true;
-    const cached = getCachedTripWeather(trip.id);
-    if (cached && !weatherData) {
+    const cached = getCachedTripWeather(trip.id, trip.destination);
+    if (cached) {
       setWeatherData(cached);
     }
 
@@ -215,31 +224,9 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
   const handleMoveItem = (index: number, direction: 'up' | 'down') => {
     if (!activeDay) return;
-    const items = [...activeDay.items];
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= items.length) return;
-
-    const temp = items[index];
-    items[index] = items[targetIdx];
-    items[targetIdx] = temp;
-
-    const updatedDays = trip.days.map((d) => (d.id === activeDay.id ? { ...d, items } : d));
+    const updatedItems = moveItineraryItemOrder(activeDay.items, index, direction);
+    const updatedDays = trip.days.map((d) => (d.id === activeDay.id ? { ...d, items: updatedItems } : d));
     onUpdateTrip({ ...trip, days: updatedDays });
-  };
-
-  const getDurationMins = (start: string, end?: string) => {
-    if (!end) return 60; // Default 1 hour if no end time
-    const [sh, sm] = start.split(':').map(Number);
-    const [eh, em] = end.split(':').map(Number);
-    return (eh * 60 + em) - (sh * 60 + sm);
-  };
-
-  const addMins = (time: string, mins: number) => {
-    const [h, m] = time.split(':').map(Number);
-    const total = Math.max(0, h * 60 + m + mins);
-    const nh = Math.floor(total / 60) % 24;
-    const nm = total % 60;
-    return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
   };
 
   const handleDrop = (e: React.DragEvent, targetIndex: number) => {
@@ -259,7 +246,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     }
 
     movedItem.time = newStartTime;
-    movedItem.endTime = addMins(newStartTime, duration);
+    movedItem.endTime = addMinsToTime(newStartTime, duration);
 
     items.splice(targetIndex, 0, movedItem);
     items.sort((a, b) => a.time.localeCompare(b.time));
@@ -295,7 +282,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
       }
       
       movedItem!.time = newStartTime;
-      movedItem!.endTime = addMins(newStartTime, duration);
+      movedItem!.endTime = addMinsToTime(newStartTime, duration);
 
       const finalDays = updatedDays.map(day => {
         if (day.dayNumber === targetDayNumber) {
@@ -308,21 +295,29 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   };
 
   const handleAddNewDay = () => {
-    const newDayNum = trip.days.length + 1;
-    const lastDate = new Date(trip.days[trip.days.length - 1]?.date || trip.startDate);
-    lastDate.setDate(lastDate.getDate() + 1);
-    const dateStr = lastDate.toISOString().split('T')[0];
+    const updatedTrip = addDayToTrip(trip);
+    onUpdateTrip(updatedTrip);
+    onSelectDay(updatedTrip.days.length);
+  };
 
-    const newDay: DayPlan = {
-      id: `day-${Date.now()}`,
-      dayNumber: newDayNum,
-      date: dateStr,
-      themeTitle: `第 ${newDayNum} 天 自由探索`,
-      items: [],
-    };
+  const handleRemoveDay = (dayNumberToRemove: number) => {
+    if (trip.days.length <= 1) return;
+    const updatedTrip = removeDayFromTrip(trip, dayNumberToRemove);
+    onUpdateTrip(updatedTrip);
+    if (selectedDayNumber > updatedTrip.days.length) {
+      onSelectDay(updatedTrip.days.length);
+    }
+  };
 
-    onUpdateTrip({ ...trip, days: [...trip.days, newDay] });
-    onSelectDay(newDayNum);
+  const handleChangeStartDate = (newStartDate: string) => {
+    const updatedTrip = syncTripDatesAndDays(trip, newStartDate, undefined, true);
+    onUpdateTrip(updatedTrip);
+  };
+
+  const handleChangeActiveDayDate = (newDate: string) => {
+    if (!activeDay) return;
+    const updatedTrip = updateDayDateAndCascade(trip, activeDay.dayNumber, newDate);
+    onUpdateTrip(updatedTrip);
   };
 
   const getCategoryIcon = (category: PlaceCategory) => {
@@ -364,21 +359,72 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
       {/* Day Selector Header & Tabs */}
       <div className="bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-700 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-neutral-100 dark:border-neutral-800">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Calendar className="w-5 h-5 text-primary-600" />
             <h2 className="text-base font-bold text-neutral-900 dark:text-white">行程時程規劃 (Itinerary Timeline)</h2>
-            <span className="px-2 py-0.5 bg-primary-50 text-primary-700 text-xs font-semibold rounded-full">
-              共 {trip.days.length} 天
+            <span className="px-2 py-0.5 bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 text-xs font-semibold rounded-full">
+              共 {trip.days.length} 天 ({trip.startDate} ~ {trip.endDate})
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400 hidden lg:inline">目的地城市：</span>
+              <div className="w-44 sm:w-48">
+                <AutocompleteInput
+                  value={trip.destination}
+                  onChange={(newDest) => onUpdateTrip({ ...trip, destination: newDest })}
+                  options={[
+                    '東京 (Tokyo)',
+                    '大阪 (Osaka)',
+                    '京都 (Kyoto)',
+                    '北海道 札幌 (Sapporo)',
+                    '沖繩 (Okinawa)',
+                    '福岡 (Fukuoka)',
+                    '名古屋 (Nagoya)',
+                    '奈良 (Nara)',
+                    '橫濱 (Yokohama)',
+                    '神戶 (Kobe)',
+                    '仙台 (Sendai)',
+                    '首爾 (Seoul)',
+                    '釜山 (Busan)',
+                    '濟州島 (Jeju)',
+                    '曼谷 (Bangkok)',
+                    '清邁 (Chiang Mai)',
+                    '普吉島 (Phuket)',
+                    '台北 (Taipei)',
+                    '台中 (Taichung)',
+                    '台南 (Tainan)',
+                    '高雄 (Kaohsiung)',
+                    '香港 (Hong Kong)',
+                    '新加坡 (Singapore)',
+                    '巴黎 (Paris)',
+                    '倫敦 (London)',
+                    '羅馬 (Rome)',
+                    '紐約 (New York)',
+                    '雪梨 (Sydney)'
+                  ]}
+                  placeholder="輸入或選擇旅遊城市..."
+                  className="w-full px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 text-xs sm:text-sm font-bold text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-primary-500 shadow-xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400 hidden lg:inline">出發日期：</span>
+              <CustomDatePicker
+                value={trip.startDate}
+                onChange={handleChangeStartDate}
+                placeholder="設定出發日"
+              />
+            </div>
+
             <button
               onClick={handleAddNewDay}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-50 hover:bg-primary-100 text-primary-700 rounded-xl text-xs font-bold transition-all"
+              className="flex items-center gap-1.5 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/60 text-primary-700 dark:text-primary-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>新增天數 (Add Day)</span>
+              <span>新增天數</span>
             </button>
           </div>
         </div>
@@ -390,33 +436,47 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
             const dayForecast = weatherData?.daily.find((d) => d.date === day.date);
 
             return (
-              <button
-                key={day.id}
-                onClick={() => onSelectDay(day.dayNumber)}
-                className={`flex-shrink-0 flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-left transition-all ${
-                  isSelected
-                    ? 'bg-primary-600 text-white border-primary-600 shadow-md shadow-primary-600/20'
-                    : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:border-neutral-600'
-                }`}
-              >
-                <div>
-                  <div className="text-xs font-bold flex items-center gap-1.5">
-                    <span>Day {day.dayNumber}</span>
-                    {dayForecast && (
-                      <WeatherIcon type={dayForecast.iconType} className="w-3.5 h-3.5 flex-shrink-0" />
-                    )}
+              <div key={day.id} className="relative group/daypill flex-shrink-0">
+                <button
+                  onClick={() => onSelectDay(day.dayNumber)}
+                  className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-primary-600 text-white border-primary-600 shadow-md shadow-primary-600/20'
+                      : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:border-neutral-600'
+                  }`}
+                >
+                  <div>
+                    <div className="text-xs font-bold flex items-center gap-1.5">
+                      <span>Day {day.dayNumber}</span>
+                      {dayForecast && (
+                        <WeatherIcon type={dayForecast.iconType} className="w-3.5 h-3.5 flex-shrink-0" />
+                      )}
+                    </div>
+                    <div className={`text-[11px] ${isSelected ? 'text-primary-100' : 'text-neutral-400 dark:text-neutral-500'}`}>
+                      {day.date.substring(5)}
+                      {dayForecast && ` • ${dayForecast.tempMax}°`}
+                    </div>
                   </div>
-                  <div className={`text-[11px] ${isSelected ? 'text-primary-100' : 'text-neutral-400 dark:text-neutral-600'}`}>
-                    {day.date.substring(5)}
-                    {dayForecast && ` • ${dayForecast.tempMax}°`}
-                  </div>
-                </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
-                  isSelected ? 'bg-white/20 dark:bg-neutral-900/20 text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
-                }`}>
-                  {day.items.length} 點
-                </span>
-              </button>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                    isSelected ? 'bg-white/20 dark:bg-neutral-900/20 text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
+                  }`}>
+                    {day.items.length} 點
+                  </span>
+                </button>
+                {trip.days.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveDay(day.dayNumber);
+                    }}
+                    title={`刪除第 ${day.dayNumber} 天`}
+                    className="opacity-0 group-hover/daypill:opacity-100 absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm hover:bg-rose-600 transition-all cursor-pointer z-10"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             );
           })}
         </div>
@@ -427,7 +487,13 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
         <div className="bg-gradient-to-r from-neutral-900 to-primary-950 text-white p-5 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2 text-primary-300 text-xs font-semibold">
-              <span>Day {activeDay.dayNumber} • {activeDay.date}</span>
+              <span className="font-bold text-white">Day {activeDay.dayNumber}</span>
+              <span>•</span>
+              <CustomDatePicker
+                value={activeDay.date}
+                onChange={handleChangeActiveDayDate}
+                variant="badge"
+              />
               <span>•</span>
               {(() => {
                 const dayForecast = weatherData?.daily.find((d) => d.date === activeDay.date);
@@ -517,7 +583,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsAddingItem(true)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
+              className="flex items-center gap-1.5 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>新增景點/活動</span>
@@ -563,59 +629,28 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1.5">
                     開始時間 *
                   </label>
-                  <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
-                      <Clock className="w-4 h-4 text-neutral-400 group-hover:text-primary-500 transition-colors" />
-                    </div>
-                    <DatePicker
-                      selected={itemTime ? new Date(`2000-01-01T${itemTime}:00`) : null}
-                      onChange={(date) => {
-                        if (date) {
-                          const hours = date.getHours().toString().padStart(2, '0');
-                          const minutes = date.getMinutes().toString().padStart(2, '0');
-                          setItemTime(`${hours}:${minutes}`);
-                        }
-                      }}
-                      showTimeSelect
-                      showTimeSelectOnly
-                      timeIntervals={15}
-                      timeFormat="HH:mm"
-                      timeCaption="時間"
-                      dateFormat="HH:mm"
-                      className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 text-sm font-bold text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 shadow-sm"
-                    />
-                  </div>
+                  <CustomTimePicker
+                    value={itemTime}
+                    onChange={(newTime) => {
+                      setItemTime(newTime);
+                      // Auto-adjust endTime if endTime is earlier than startTime
+                      if (itemEndTime && newTime >= itemEndTime) {
+                        setItemEndTime(addMinsToTime(newTime, 60));
+                      }
+                    }}
+                    placeholder="選擇開始時間"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1.5">
                     結束時間
                   </label>
-                  <div className="relative group">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none z-10">
-                      <Clock className="w-4 h-4 text-neutral-400 group-hover:text-primary-500 transition-colors" />
-                    </div>
-                    <DatePicker
-                      selected={itemEndTime ? new Date(`2000-01-01T${itemEndTime}:00`) : null}
-                      onChange={(date) => {
-                        if (date) {
-                          const hours = date.getHours().toString().padStart(2, '0');
-                          const minutes = date.getMinutes().toString().padStart(2, '0');
-                          setItemEndTime(`${hours}:${minutes}`);
-                        } else {
-                          setItemEndTime('');
-                        }
-                      }}
-                      isClearable
-                      placeholderText="未設定"
-                      showTimeSelect
-                      showTimeSelectOnly
-                      timeIntervals={15}
-                      timeFormat="HH:mm"
-                      timeCaption="時間"
-                      dateFormat="HH:mm"
-                      className="w-full pl-9 pr-3.5 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 text-sm font-bold text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all cursor-pointer hover:border-primary-400 dark:hover:border-primary-600 shadow-sm"
-                    />
-                  </div>
+                  <CustomTimePicker
+                    value={itemEndTime}
+                    onChange={setItemEndTime}
+                    isClearable
+                    placeholder="未設定"
+                  />
                 </div>
               </div>
 

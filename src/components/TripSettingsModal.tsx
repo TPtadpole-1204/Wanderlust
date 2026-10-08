@@ -15,6 +15,8 @@ import {
 import { POPULAR_CURRENCIES } from '../services/storage';
 import { AutocompleteInput } from './AutocompleteInput';
 import { CurrencyDropdown } from './CurrencyDropdown';
+import { CustomDatePicker } from './CustomDateTimePicker';
+import { syncTripDatesAndDays, addDaysToDateStr } from '../services/itineraryUtils';
 
 interface TripSettingsModalProps {
   initialTab?: 'edit' | 'switch' | 'create' | 'aiImport';
@@ -127,63 +129,80 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateTrip({
-      ...trip,
-      title,
-      destination,
-      countryCode,
+    const syncedTrip = syncTripDatesAndDays(
+      {
+        ...trip,
+        title,
+        destination,
+        countryCode,
+        totalBudget: Number(totalBudget),
+        baseCurrency,
+        targetCurrency,
+        coverImage,
+      },
       startDate,
       endDate,
-      totalBudget: Number(totalBudget),
-      baseCurrency,
-      targetCurrency,
-      coverImage,
-    });
+      false
+    );
+    onUpdateTrip(syncedTrip);
     onClose();
   };
 
   const handleApplyPreset = (preset: Partial<Trip>) => {
-    const newTrip: Trip = {
-      id: `trip-${Date.now()}`,
-      title: preset.title !== undefined ? preset.title : '新旅程',
-      destination: preset.destination !== undefined ? preset.destination : '',
-      countryCode: preset.countryCode || 'JP',
-      startDate: '2025-11-10',
-      endDate: '2025-11-14',
-      coverImage: preset.coverImage || 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80',
-      baseCurrency: preset.baseCurrency || 'TWD',
-      targetCurrency: preset.targetCurrency || 'JPY',
-      totalBudget: preset.totalBudget || 50000,
-      shareCode: `TRIP-${Math.floor(1000 + Math.random() * 9000)}`,
-      offlineReady: false,
-      collaborators: trip.collaborators,
-      flights: [],
-      attractions: [],
-      expenses: [],
-      days: [
-        {
-          id: `day-${Date.now()}-1`,
-          dayNumber: 1,
-          date: '2025-11-10',
-          themeTitle: '抵達目的地與市區初訪',
-          items: [],
-        },
-        {
-          id: `day-${Date.now()}-2`,
-          dayNumber: 2,
-          date: '2025-11-11',
-          themeTitle: '經典名勝與代表美食巡禮',
-          items: [],
-        },
-        {
-          id: `day-${Date.now()}-3`,
-          dayNumber: 3,
-          date: '2025-11-12',
-          themeTitle: '私房巷弄探店與購物商圈',
-          items: [],
-        },
-      ],
-    };
+    const presetDays = preset.days || [
+      {
+        id: `day-${Date.now()}-1`,
+        dayNumber: 1,
+        date: '2025-11-10',
+        themeTitle: '抵達目的地與市區初訪',
+        items: [],
+      },
+      {
+        id: `day-${Date.now()}-2`,
+        dayNumber: 2,
+        date: '2025-11-11',
+        themeTitle: '經典名勝與代表美食巡禮',
+        items: [],
+      },
+      {
+        id: `day-${Date.now()}-3`,
+        dayNumber: 3,
+        date: '2025-11-12',
+        themeTitle: '私房巷弄探店與購物商圈',
+        items: [],
+      },
+    ];
+    const startStr = '2025-11-10';
+    const endStr = addDaysToDateStr(startStr, presetDays.length - 1);
+
+    const newTrip: Trip = syncTripDatesAndDays(
+      {
+        id: `trip-${Date.now()}`,
+        title: preset.title !== undefined ? preset.title : '新旅程',
+        destination: preset.destination !== undefined ? preset.destination : '',
+        countryCode: preset.countryCode || 'JP',
+        startDate: startStr,
+        endDate: endStr,
+        coverImage: preset.coverImage || 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80',
+        baseCurrency: preset.baseCurrency || 'TWD',
+        targetCurrency: preset.targetCurrency || 'JPY',
+        totalBudget: preset.totalBudget || 50000,
+        shareCode: `TRIP-${Math.floor(1000 + Math.random() * 9000)}`,
+        offlineReady: false,
+        collaborators: trip.collaborators,
+        flights: [],
+        attractions: [],
+        expenses: [],
+        days: presetDays.map((d, idx) => ({
+          ...d,
+          id: `day-${Date.now()}-${idx + 1}`,
+          dayNumber: idx + 1,
+        })),
+      },
+      startStr,
+      endStr,
+      true
+    );
 
     onCreateNewTrip(newTrip);
     onClose();
@@ -338,20 +357,24 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">出發日期</label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    onChange={(newStart) => {
+                      setStartDate(newStart);
+                      if (endDate < newStart) {
+                        setEndDate(newStart);
+                      }
+                    }}
+                    placeholder="選擇出發日期"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">結束日期</label>
-                  <input
-                    type="date"
+                  <CustomDatePicker
                     value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    minDate={startDate}
+                    onChange={(newEnd) => setEndDate(newEnd)}
+                    placeholder="選擇結束日期"
                   />
                 </div>
               </div>

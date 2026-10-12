@@ -1,5 +1,5 @@
-import { Collaborator, Expense } from '../types';
-import { formatMoney, convertCurrency, getCachedRates } from './currency';
+import type { Collaborator, Expense } from '../types.ts';
+import { formatMoney, convertCurrency, getCachedRates } from './currency.ts';
 
 export interface SettlementTransfer {
   from: string; // Member who owes money

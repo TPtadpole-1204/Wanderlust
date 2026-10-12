@@ -23,7 +23,8 @@ import {
   Sun,
   Palette,
   Upload,
-  Download
+  Download,
+  ShieldCheck
 } from 'lucide-react';
 
 import { exportAllData, importAllData } from '../services/importExport';
@@ -38,6 +39,7 @@ interface SidebarProps {
   onTabChange: (tab: ActiveTab) => void;
   onOpenSettings: () => void;
   onOpenAIImport: () => void;
+  onOpenVerification?: () => void;
   onExportPDF: () => void;
   isExportingPDF: boolean;
   onSelectTrip?: (trip: Trip) => void;
@@ -55,6 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onTabChange,
   onOpenSettings,
   onOpenAIImport,
+  onOpenVerification,
   onExportPDF,
   isExportingPDF,
   onSelectTrip,
@@ -320,6 +323,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Settings className="w-4 h-4 text-neutral-400 dark:text-neutral-600" />
             <span>所有旅程管理</span>
           </button>
+
+          {onOpenVerification && (
+            <button
+              onClick={onOpenVerification}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-xl transition-all border border-emerald-200/60 dark:border-emerald-800/50 cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>系統驗證與邏輯檢測</span>
+            </button>
+          )}
         </div>
       </aside>
 
@@ -453,6 +466,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <Settings className="w-4 h-4" />
                     管理與新增行程
                   </button>
+
+                  {onOpenVerification && (
+                    <button
+                      onClick={() => {
+                        setShowTripMenu(false);
+                        onOpenVerification();
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-bold transition-colors"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      系統驗證與邏輯檢測
+                    </button>
+                  )}
                 </div>
               </div>
             </>

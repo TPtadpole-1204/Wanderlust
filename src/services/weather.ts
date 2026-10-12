@@ -1,4 +1,4 @@
-import { Trip } from '../types';
+import type { Trip } from '../types.ts';
 
 export interface DailyForecast {
   date: string; // YYYY-MM-DD
@@ -24,6 +24,7 @@ export interface CurrentWeather {
 
 export interface TripWeatherData {
   tripId: string;
+  queriedDestination?: string;
   cityName: string;
   latitude: number;
   longitude: number;
@@ -46,21 +47,38 @@ const POPULAR_DESTINATIONS: Record<string, { lat: number; lng: number; name: str
   沖繩: { lat: 26.2124, lng: 127.6809, name: '沖繩' },
   sapporo: { lat: 43.0618, lng: 141.3545, name: '札幌 (Sapporo)' },
   札幌: { lat: 43.0618, lng: 141.3545, name: '札幌' },
+  hokkaido: { lat: 43.0618, lng: 141.3545, name: '北海道 (Hokkaido)' },
   北海道: { lat: 43.0618, lng: 141.3545, name: '北海道' },
   fukuoka: { lat: 33.5904, lng: 130.4017, name: '福岡 (Fukuoka)' },
   福岡: { lat: 33.5904, lng: 130.4017, name: '福岡' },
+  nagoya: { lat: 35.1815, lng: 136.9066, name: '名古屋 (Nagoya)' },
+  名古屋: { lat: 35.1815, lng: 136.9066, name: '名古屋' },
+  nara: { lat: 34.6851, lng: 135.8048, name: '奈良 (Nara)' },
+  奈良: { lat: 34.6851, lng: 135.8048, name: '奈良' },
+  yokohama: { lat: 35.4437, lng: 139.6380, name: '橫濱 (Yokohama)' },
+  橫濱: { lat: 35.4437, lng: 139.6380, name: '橫濱' },
+  kobe: { lat: 34.6901, lng: 135.1956, name: '神戶 (Kobe)' },
+  神戶: { lat: 34.6901, lng: 135.1956, name: '神戶' },
+  sendai: { lat: 38.2682, lng: 140.8694, name: '仙台 (Sendai)' },
+  仙台: { lat: 38.2682, lng: 140.8694, name: '仙台' },
   seoul: { lat: 37.5665, lng: 126.9780, name: '首爾 (Seoul)' },
   首爾: { lat: 37.5665, lng: 126.9780, name: '首爾' },
   busan: { lat: 35.1796, lng: 129.0756, name: '釜山 (Busan)' },
   釜山: { lat: 35.1796, lng: 129.0756, name: '釜山' },
+  jeju: { lat: 33.4996, lng: 126.5312, name: '濟州島 (Jeju)' },
+  濟州: { lat: 33.4996, lng: 126.5312, name: '濟州島' },
   bangkok: { lat: 13.7563, lng: 100.5018, name: '曼谷 (Bangkok)' },
   曼谷: { lat: 13.7563, lng: 100.5018, name: '曼谷' },
   'chiang mai': { lat: 18.7883, lng: 98.9853, name: '清邁 (Chiang Mai)' },
   清邁: { lat: 18.7883, lng: 98.9853, name: '清邁' },
+  phuket: { lat: 7.8804, lng: 98.3923, name: '普吉島 (Phuket)' },
+  普吉島: { lat: 7.8804, lng: 98.3923, name: '普吉島' },
   taipei: { lat: 25.0330, lng: 121.5654, name: '台北 (Taipei)' },
   台北: { lat: 25.0330, lng: 121.5654, name: '台北' },
   台中: { lat: 24.1477, lng: 120.6736, name: '台中' },
   高雄: { lat: 22.6273, lng: 120.3014, name: '高雄' },
+  台南: { lat: 22.9997, lng: 120.2270, name: '台南' },
+  花蓮: { lat: 23.9872, lng: 121.6016, name: '花蓮' },
   hongkong: { lat: 22.3193, lng: 114.1694, name: '香港 (Hong Kong)' },
   香港: { lat: 22.3193, lng: 114.1694, name: '香港' },
   singapore: { lat: 1.3521, lng: 103.8198, name: '新加坡 (Singapore)' },
@@ -144,7 +162,34 @@ export async function resolveTripCoordinates(trip: Trip): Promise<{ lat: number;
     }
   }
 
-  // 2. Check if any items in the trip have coordinates
+  // 2. Clean string and try Open-Meteo Geocoding API first if destination is set
+  const cleanName = (trip.destination || '')
+    .replace(/[(),]/g, ' ')
+    .split(' ')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 1)[0] || trip.destination;
+
+  if (cleanName) {
+    try {
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cleanName)}&count=1&language=zh&format=json`;
+      const res = await fetch(geoUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          const top = data.results[0];
+          return {
+            lat: top.latitude,
+            lng: top.longitude,
+            name: `${top.name}${top.country ? `, ${top.country}` : ''}`,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Geocoding fallback failed:', err);
+    }
+  }
+
+  // 3. Fallback: Check if any items in the trip have coordinates
   for (const day of trip.days) {
     if (day.accommodation?.coords && day.accommodation.coords.lat !== 0) {
       return {
@@ -164,45 +209,23 @@ export async function resolveTripCoordinates(trip: Trip): Promise<{ lat: number;
     }
   }
 
-  // 3. Clean string and try Open-Meteo Geocoding API
-  const cleanName = trip.destination
-    .replace(/[(),]/g, ' ')
-    .split(' ')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 1)[0] || trip.destination;
-
-  try {
-    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cleanName)}&count=1&language=zh&format=json`;
-    const res = await fetch(geoUrl);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.results && data.results.length > 0) {
-        const top = data.results[0];
-        return {
-          lat: top.latitude,
-          lng: top.longitude,
-          name: `${top.name}${top.country ? `, ${top.country}` : ''}`,
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('Geocoding fallback failed:', err);
-  }
-
   // Default fallback: Tokyo
   return { lat: 35.6895, lng: 139.6917, name: trip.destination || '東京' };
 }
 
-const STORAGE_PREFIX = 'travel_weather_v1_';
+const STORAGE_PREFIX = 'travel_weather_v2_';
 
 /**
  * Retrieve cached weather from local storage
  */
-export function getCachedTripWeather(tripId: string): TripWeatherData | null {
+export function getCachedTripWeather(tripId: string, destination?: string): TripWeatherData | null {
   try {
     const raw = localStorage.getItem(`${STORAGE_PREFIX}${tripId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
+    if (destination && parsed.queriedDestination && parsed.queriedDestination !== destination) {
+      return null;
+    }
     return { ...parsed, isCachedOffline: true };
   } catch {
     return null;
@@ -213,7 +236,7 @@ export function getCachedTripWeather(tripId: string): TripWeatherData | null {
  * Fetch real-time and 14-day weather forecast from Open-Meteo
  */
 export async function fetchTripWeather(trip: Trip, forceRefresh = false): Promise<TripWeatherData | null> {
-  const cached = getCachedTripWeather(trip.id);
+  const cached = getCachedTripWeather(trip.id, trip.destination);
 
   // Return cached if fresh within 2 hours and not forced
   if (cached && !forceRefresh) {
@@ -265,6 +288,7 @@ export async function fetchTripWeather(trip: Trip, forceRefresh = false): Promis
 
     const weatherData: TripWeatherData = {
       tripId: trip.id,
+      queriedDestination: trip.destination,
       cityName: coords.name,
       latitude: coords.lat,
       longitude: coords.lng,

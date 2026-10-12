@@ -1,8 +1,7 @@
 import { ConfirmModal } from './ConfirmModal';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import React, { useState, useEffect } from 'react';
 import { AutocompleteInput } from './AutocompleteInput';
+import { CustomDateTimePicker } from './CustomDateTimePicker';
 import { Trip, FlightInfo } from '../types';
 import { 
   Plane, ChevronDown, 
@@ -158,10 +157,10 @@ export const FlightTrackerView: React.FC<FlightTrackerViewProps> = ({
     setAirline('長榮航空 (EVA Air)');
     setDepAirport('TPE (桃園機場)');
     setDepCity('台北 (Taipei)');
-    setDepTime('');
+    setDepTime(`${trip.startDate} 09:00`);
     setArrAirport('NRT (成田機場)');
     setArrCity('東京 (Tokyo)');
-    setArrTime('');
+    setArrTime(`${trip.startDate} 13:15`);
     setTerminal('T2');
     setGate('');
     setBaggageClaim('');
@@ -498,28 +497,13 @@ export const FlightTrackerView: React.FC<FlightTrackerViewProps> = ({
                     
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none z-10">
-                      <Calendar className="h-3.5 w-3.5 text-neutral-400" />
-                    </div>
-                    <DatePicker
-                      selected={depTime ? new Date(depTime.replace(' ', 'T')) : null}
-                      onChange={(date) => {
-                        if (date) {
-                          const tzOffset = date.getTimezoneOffset() * 60000; // offset in milliseconds
-                          const localISOTime = (new Date(date.getTime() - tzOffset)).toISOString().slice(0, 16).replace('T', ' ');
-                          setDepTime(localISOTime);
-                        }
-                      }}
-                      showTimeSelect
-                      timeFormat="HH:mm"
-                      timeIntervals={15}
-                      dateFormat="yyyy-MM-dd HH:mm"
-                      placeholderText="選擇起飛時間"
-                      className="w-full pl-8 pr-2 py-2 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-neutral-600 dark:text-neutral-400 mb-1">起飛日期與時間</label>
+                  <CustomDateTimePicker
+                    value={depTime}
+                    onChange={setDepTime}
+                    placeholder="選擇起飛日期"
+                  />
                 </div>
               </div>
 
@@ -583,28 +567,13 @@ export const FlightTrackerView: React.FC<FlightTrackerViewProps> = ({
                     
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none z-10">
-                      <Calendar className="h-3.5 w-3.5 text-neutral-400" />
-                    </div>
-                    <DatePicker
-                      selected={arrTime ? new Date(arrTime.replace(' ', 'T')) : null}
-                      onChange={(date) => {
-                        if (date) {
-                          const tzOffset = date.getTimezoneOffset() * 60000;
-                          const localISOTime = (new Date(date.getTime() - tzOffset)).toISOString().slice(0, 16).replace('T', ' ');
-                          setArrTime(localISOTime);
-                        }
-                      }}
-                      showTimeSelect
-                      timeFormat="HH:mm"
-                      timeIntervals={15}
-                      dateFormat="yyyy-MM-dd HH:mm"
-                      placeholderText="選擇抵達時間"
-                      className="w-full pl-8 pr-2 py-2 bg-white dark:bg-neutral-900 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-neutral-600 dark:text-neutral-400 mb-1">抵達日期與時間</label>
+                  <CustomDateTimePicker
+                    value={arrTime}
+                    onChange={setArrTime}
+                    placeholder="選擇抵達日期"
+                  />
                 </div>
               </div>
 

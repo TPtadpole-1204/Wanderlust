@@ -18,6 +18,8 @@ import {
 , ChevronDown } from 'lucide-react';
 import { formatMoney } from '../services/currency';
 import { ConfirmModal } from './ConfirmModal';
+import { CustomTimePicker } from './CustomDateTimePicker';
+import { addMinsToTime } from '../services/itineraryUtils';
 
 interface AttractionsViewProps {
   trip: Trip;
@@ -162,6 +164,7 @@ export const AttractionsView: React.FC<AttractionsViewProps> = ({
       id: `item-${Date.now()}`,
       title: addingToDayModal.title,
       time: targetTime,
+      endTime: addMinsToTime(targetTime, 90),
       category: addingToDayModal.category,
       locationName: addingToDayModal.address || addingToDayModal.title,
       coords: addingToDayModal.coords,
@@ -432,11 +435,10 @@ export const AttractionsView: React.FC<AttractionsViewProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">預計抵達時間</label>
-                <input
-                  type="time"
+                <CustomTimePicker
                   value={targetTime}
-                  onChange={(e) => setTargetTime(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  onChange={(newTime) => setTargetTime(newTime || '14:00')}
+                  placeholder="選擇時間"
                 />
               </div>
             </div>

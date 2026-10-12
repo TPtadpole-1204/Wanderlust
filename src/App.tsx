@@ -18,6 +18,7 @@ import { FlightTrackerView } from './components/FlightTrackerView';
 
 import { ChecklistView } from './components/ChecklistView';
 import { TripSettingsModal } from './components/TripSettingsModal';
+import { VerificationModal } from './components/VerificationModal';
 import { Sparkles, WifiOff } from 'lucide-react';
 import { useTheme } from './hooks/useTheme';
 
@@ -52,6 +53,7 @@ export default function App() {
   // Modals state
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'edit' | 'switch' | 'create' | 'aiImport'>('edit');
+  const [isVerificationOpen, setIsVerificationOpen] = useState(false);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Save changes to localStorage & sync
@@ -118,6 +120,7 @@ export default function App() {
         onTabChange={setActiveTab}
         onOpenSettings={() => { setSettingsInitialTab('edit'); setIsSettingsOpen(true); }}
         onOpenAIImport={() => { setSettingsInitialTab('aiImport'); setIsSettingsOpen(true); }}
+        onOpenVerification={() => setIsVerificationOpen(true)}
         onExportPDF={handleExportPDF}
         isExportingPDF={isExportingPDF}
         onSelectTrip={handleSelectTrip}
@@ -191,6 +194,13 @@ export default function App() {
         onUpdateTrip={handleUpdateTrip}
         onCreateNewTrip={handleCreateNewTrip}
         onDeleteTrip={handleDeleteTrip}
+      />
+
+      <VerificationModal
+        isOpen={isVerificationOpen}
+        onClose={() => setIsVerificationOpen(false)}
+        trip={currentTrip}
+        onUpdateTrip={handleUpdateTrip}
       />
 
     

@@ -1,4 +1,4 @@
-import { DEFAULT_RATES, POPULAR_CURRENCIES } from './storage';
+import { DEFAULT_RATES, POPULAR_CURRENCIES } from './storage.ts';
 
 export interface ExchangeRateTable {
   rates: Record<string, number>; // relative to TWD (1 TWD = X currency)

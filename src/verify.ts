@@ -1,5 +1,9 @@
 // Global localStorage polyfill for Node.js CLI verification environment
-if (typeof globalThis.localStorage === 'undefined') {
+if (
+  typeof globalThis.localStorage === 'undefined' ||
+  typeof globalThis.localStorage.getItem !== 'function' ||
+  typeof globalThis.localStorage.setItem !== 'function'
+) {
   const store: Record<string, string> = {};
   (globalThis as any).localStorage = {
     getItem: (key: string) => store[key] ?? null,
@@ -11,6 +15,10 @@ if (typeof globalThis.localStorage === 'undefined') {
     },
     clear: () => {
       for (const k of Object.keys(store)) delete store[k];
+    },
+    key: (i: number) => Object.keys(store)[i] ?? null,
+    get length() {
+      return Object.keys(store).length;
     },
   };
 }

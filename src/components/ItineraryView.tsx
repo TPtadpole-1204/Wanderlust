@@ -10,6 +10,7 @@ import {
   moveItineraryItemOrder,
   getDurationMins,
   addMinsToTime,
+  reorderDaysInTrip,
 } from '../services/itineraryUtils';
 import {  
   Plus, 
@@ -36,13 +37,21 @@ import {
   ChevronRight,
   Umbrella,
   ExternalLink,
-  Link2
-, ChevronDown, Edit2, Search } from 'lucide-react';
+  Link2,
+  ChevronDown,
+  Edit2,
+  Search,
+  GripVertical,
+  ArrowLeftRight,
+} from 'lucide-react';
 import { formatMoney } from '../services/currency';
 import { fetchTripWeather, getCachedTripWeather, TripWeatherData } from '../services/weather';
 import { WeatherDetailModal, WeatherIcon } from './WeatherDetailModal';
 import { MoveDayModal } from './MoveDayModal';
 import { ConfirmModal } from './ConfirmModal';
+import { GoogleRouteModal } from './GoogleRouteModal';
+import { RoutePlace } from '../services/googleRouteService';
+import { ReorderDaysModal } from './ReorderDaysModal';
 
 interface ItineraryViewProps {
   trip: Trip;
@@ -60,12 +69,18 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
   const [isAddingItem, setIsAddingItem] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleteConfirmDayNumber, setDeleteConfirmDayNumber] = useState<number | null>(null);
+  const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
+  const [confirmDeleteItemInModal, setConfirmDeleteItemInModal] = useState(false);
   const [editingThemeDayId, setEditingThemeDayId] = useState<string | null>(null);
   const [editingThemeTitle, setEditingThemeTitle] = useState('');
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+  const [draggedDayIndex, setDraggedDayIndex] = useState<number | null>(null);
+  const [dragOverDayIndex, setDragOverDayIndex] = useState<number | null>(null);
+  const [isReorderDaysModalOpen, setIsReorderDaysModalOpen] = useState(false);
 
   // Form State
   const [itemTitle, setItemTitle] = useState('');
@@ -98,6 +113,73 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
   // Move Day state
   const [itemToMove, setItemToMove] = useState<ItineraryItem | null>(null);
+
+  // Google Route Modal state
+  const [routeModalPair, setRouteModalPair] = useState<{
+    from: RoutePlace;
+    to: RoutePlace;
+    fromItemId?: string;
+    isForForm?: boolean;
+  } | null>(null);
+  const [toastMessage, setToastMessage] = useState('');
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? '' : prev));
+    }, 3500);
+  };
+
+  const handleApplyGoogleRoute = (option: {
+    mode: TransportOption['mode'];
+    durationMinutes: number;
+    distanceText?: string;
+    routeUrl: string;
+    label: string;
+  }) => {
+    if (!routeModalPair) return;
+
+    if (routeModalPair.isForForm) {
+      setTransportOptions([
+        {
+          mode: option.mode,
+          durationMinutes: option.durationMinutes,
+          distanceText: option.distanceText,
+          routes: [{ label: option.label, url: option.routeUrl }],
+        },
+      ]);
+      triggerToast(`已帶入 Google 推薦交通：${option.label} (約 ${option.durationMinutes} 分鐘)`);
+      return;
+    }
+
+    if (!routeModalPair.fromItemId || !activeDay) return;
+
+    const updatedDays = trip.days.map((day) => {
+      if (day.id === activeDay.id) {
+        const updatedItems = day.items.map((it) => {
+          if (it.id === routeModalPair.fromItemId) {
+            const newTransport: TransportOption = {
+              mode: option.mode,
+              durationMinutes: option.durationMinutes,
+              distanceText: option.distanceText,
+              routes: [{ label: option.label, url: option.routeUrl }],
+            };
+            return {
+              ...it,
+              transportToNext: newTransport,
+              transportOptions: [newTransport],
+            };
+          }
+          return it;
+        });
+        return { ...day, items: updatedItems };
+      }
+      return day;
+    });
+
+    onUpdateTrip({ ...trip, days: updatedDays });
+    triggerToast(`已成功套用 Google 推薦交通方案 (${option.label})！`);
+  };
 
   React.useEffect(() => {
     let isMounted = true;
@@ -148,6 +230,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     setTransportOptions([{ mode: 'subway', durationMinutes: 15, routes: [] }]);
     setEditingItem(null);
     setIsAddingItem(false);
+    setConfirmDeleteItemInModal(false);
   };
 
   const handleSaveItem = (e: React.FormEvent) => {
@@ -254,6 +337,61 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
     const updatedDays = trip.days.map((d) => (d.id === activeDay.id ? { ...d, items } : d));
     onUpdateTrip({ ...trip, days: updatedDays });
     setDraggedItemIndex(null);
+  };
+
+  const handleDayDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.setData('text/plain', `day:${index}`);
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedDayIndex(index);
+  };
+
+  const handleDayDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedDayIndex !== null && draggedDayIndex !== index) {
+      setDragOverDayIndex(index);
+    } else if (draggedItemIndex !== null) {
+      setDragOverDayIndex(index);
+    }
+  };
+
+  const handleDayDragLeave = () => {
+    setDragOverDayIndex(null);
+  };
+
+  const handleDayDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    setDragOverDayIndex(null);
+
+    // Scenario A: Dragging an itinerary item onto a Day pill!
+    if (draggedItemIndex !== null && activeDay) {
+      const targetDay = trip.days[targetIndex];
+      if (targetDay && targetDay.dayNumber !== activeDay.dayNumber) {
+        const itemToMove = activeDay.items[draggedItemIndex];
+        if (itemToMove) {
+          handleMoveToDay(itemToMove.id, targetDay.dayNumber);
+          triggerToast(`✨ 已將「${itemToMove.title}」成功移至第 ${targetDay.dayNumber} 天！`);
+        }
+      }
+      setDraggedItemIndex(null);
+      return;
+    }
+
+    // Scenario B: Dragging a Day pill onto another Day pill (Reordering/Swapping days)
+    if (draggedDayIndex !== null && draggedDayIndex !== targetIndex) {
+      const sourceDay = trip.days[draggedDayIndex];
+      const targetDay = trip.days[targetIndex];
+      const updatedTrip = reorderDaysInTrip(trip, draggedDayIndex, targetIndex);
+      onUpdateTrip(updatedTrip);
+      onSelectDay(targetIndex + 1);
+      triggerToast(`✨ 已將「第 ${sourceDay.dayNumber} 天」移動至「第 ${targetIndex + 1} 天」！`);
+      setDraggedDayIndex(null);
+    }
+  };
+
+  const handleDayDragEnd = () => {
+    setDraggedDayIndex(null);
+    setDragOverDayIndex(null);
   };
 
   const handleMoveToDay = (itemId: string, targetDayNumber: number) => {
@@ -419,6 +557,18 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
               />
             </div>
 
+            {trip.days.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setIsReorderDaysModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                title="開啟天數排序管理，支援拖曳排序與快速對調"
+              >
+                <ArrowLeftRight className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
+                <span>調整天數順序</span>
+              </button>
+            )}
+
             <button
               onClick={handleAddNewDay}
               className="flex items-center gap-1.5 px-3 py-2 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/50 dark:hover:bg-primary-900/60 text-primary-700 dark:text-primary-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -431,20 +581,52 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
         {/* Day Pills Bar */}
         <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1 scrollbar-none">
-          {trip.days.map((day) => {
+          {trip.days.map((day, index) => {
             const isSelected = selectedDayNumber === day.dayNumber;
             const dayForecast = weatherData?.daily.find((d) => d.date === day.date);
+            const isDraggingThisDay = draggedDayIndex === index;
+            const isTargetDay = dragOverDayIndex === index;
+            const isItemDraggingOver = isTargetDay && draggedItemIndex !== null;
 
             return (
-              <div key={day.id} className="relative group/daypill flex-shrink-0">
+              <div
+                key={day.id}
+                draggable={trip.days.length > 1}
+                onDragStart={(e) => handleDayDragStart(e, index)}
+                onDragOver={(e) => handleDayDragOver(e, index)}
+                onDragLeave={handleDayDragLeave}
+                onDrop={(e) => handleDayDrop(e, index)}
+                onDragEnd={handleDayDragEnd}
+                className={`relative group/daypill flex-shrink-0 transition-all ${
+                  isDraggingThisDay ? 'opacity-30 scale-95' : ''
+                } ${isTargetDay ? 'scale-105 z-20' : ''}`}
+              >
                 <button
                   onClick={() => onSelectDay(day.dayNumber)}
-                  className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                    isSelected
+                  className={`flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl border text-left transition-all ${
+                    isItemDraggingOver
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border-emerald-500 ring-2 ring-emerald-400 shadow-md animate-pulse'
+                      : isTargetDay && draggedDayIndex !== null
+                      ? 'bg-primary-50 dark:bg-primary-950/60 text-primary-900 dark:text-primary-100 border-primary-500 ring-2 ring-primary-500 shadow-md'
+                      : isSelected
                       ? 'bg-primary-600 text-white border-primary-600 shadow-md shadow-primary-600/20'
                       : 'bg-white dark:bg-neutral-900 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 hover:border-neutral-300 dark:border-neutral-600'
-                  }`}
+                  } ${trip.days.length > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
                 >
+                  {/* Drag Handle Affordance */}
+                  {trip.days.length > 1 && (
+                    <div
+                      title="按住可拖曳對調天數順序"
+                      className={`-ml-1 p-0.5 rounded transition-opacity ${
+                        isSelected
+                          ? 'text-white/70 hover:text-white'
+                          : 'text-neutral-400 dark:text-neutral-500 hover:text-primary-600 dark:hover:text-primary-400'
+                      }`}
+                    >
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+
                   <div>
                     <div className="text-xs font-bold flex items-center gap-1.5">
                       <span>Day {day.dayNumber}</span>
@@ -457,18 +639,30 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                       {dayForecast && ` • ${dayForecast.tempMax}°`}
                     </div>
                   </div>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
-                    isSelected ? 'bg-white/20 dark:bg-neutral-900/20 text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
-                  }`}>
-                    {day.items.length} 點
-                  </span>
+
+                  {isItemDraggingOver ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-emerald-600 text-white animate-bounce shadow-xs">
+                      放開移入
+                    </span>
+                  ) : isTargetDay && draggedDayIndex !== null ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-primary-600 text-white animate-bounce shadow-xs">
+                      放開調換
+                    </span>
+                  ) : (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                      isSelected ? 'bg-white/20 dark:bg-neutral-900/20 text-white' : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'
+                    }`}>
+                      {day.items.length} 點
+                    </span>
+                  )}
                 </button>
+
                 {trip.days.length > 1 && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleRemoveDay(day.dayNumber);
+                      setDeleteConfirmDayNumber(day.dayNumber);
                     }}
                     title={`刪除第 ${day.dayNumber} 天`}
                     className="opacity-0 group-hover/daypill:opacity-100 absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm hover:bg-rose-600 transition-all cursor-pointer z-10"
@@ -480,6 +674,18 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
             );
           })}
         </div>
+
+        {/* Drag Hint Bar */}
+        {trip.days.length > 1 && (
+          <div className="flex items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 mt-2 px-1">
+            <span className="flex items-center gap-1.5">
+              <GripVertical className="w-3 h-3 text-primary-500" />
+              <span>
+                💡 <strong>支援拖曳更換 Day：</strong>直接拖曳上方 Day 標籤可快速對調天數順序，或將下方景點卡片拖至 Day 標籤跨天搬移。
+              </span>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Selected Day Theme & Weather Card */}
@@ -639,6 +845,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                       }
                     }}
                     placeholder="選擇開始時間"
+                    fineTuneOnly
                   />
                 </div>
                 <div>
@@ -650,6 +857,7 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                     onChange={setItemEndTime}
                     isClearable
                     placeholder="未設定"
+                    fineTuneOnly
                   />
                 </div>
               </div>
@@ -800,18 +1008,82 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
 
               {/* Transport to next option */}
               <div className="p-3 bg-neutral-50 dark:bg-neutral-950 rounded-xl border border-neutral-200 dark:border-neutral-700 space-y-4">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
                     抵達下一個點之交通方式
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setTransportOptions([...transportOptions, { mode: 'car', durationMinutes: 15, routes: [] }])}
-                    className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-primary-600 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/30 dark:hover:bg-primary-950/50 rounded-lg transition-colors"
-                  >
-                    <Plus className="w-3 h-3" />
-                    新增備選方案
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        let nextDest: RoutePlace | null = null;
+                        if (editingItem) {
+                          const currIdx = activeDay.items.findIndex((it) => it.id === editingItem.id);
+                          if (currIdx >= 0 && currIdx < activeDay.items.length - 1) {
+                            nextDest = activeDay.items[currIdx + 1];
+                          }
+                        } else if (activeDay.items.length > 0) {
+                          const afterItems = activeDay.items.filter((it) => it.time > itemTime);
+                          if (afterItems.length > 0) {
+                            nextDest = afterItems[0];
+                          } else {
+                            nextDest = activeDay.items[activeDay.items.length - 1];
+                          }
+                        }
+
+                        if (nextDest) {
+                          setRouteModalPair({
+                            from: {
+                              title: itemTitle || '目前景點',
+                              locationName: itemLocation || itemTitle,
+                              coords: editingItem?.coords,
+                            },
+                            to: nextDest,
+                            isForForm: true,
+                          });
+                        } else if (activeDay.accommodation?.name) {
+                          setRouteModalPair({
+                            from: {
+                              title: itemTitle || '目前景點',
+                              locationName: itemLocation || itemTitle,
+                              coords: editingItem?.coords,
+                            },
+                            to: {
+                              title: activeDay.accommodation.name,
+                              locationName: activeDay.accommodation.address,
+                              coords: activeDay.accommodation.coords,
+                            },
+                            isForForm: true,
+                          });
+                        } else {
+                          setRouteModalPair({
+                            from: {
+                              title: itemTitle || '目前景點',
+                              locationName: itemLocation || itemTitle,
+                            },
+                            to: {
+                              title: '下一站目的地',
+                              locationName: trip.destination,
+                            },
+                            isForForm: true,
+                          });
+                        }
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:text-blue-300 dark:bg-blue-950/40 dark:hover:bg-blue-900/50 rounded-lg transition-colors border border-blue-200 dark:border-blue-800 cursor-pointer"
+                      title="取得 Google 推薦的最佳路線與預估時間"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                      Google 推薦路線
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTransportOptions([...transportOptions, { mode: 'car', durationMinutes: 15, routes: [] }])}
+                      className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-primary-600 bg-primary-50 hover:bg-primary-100 dark:bg-primary-950/30 dark:hover:bg-primary-950/50 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      新增備選方案
+                    </button>
+                  </div>
                 </div>
 
                 {transportOptions.map((opt, optIndex) => (
@@ -928,20 +1200,60 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                 ))}
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-neutral-100 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 dark:bg-neutral-800"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-primary-600 hover:bg-primary-700 text-white shadow-sm"
-                >
-                  儲存行程
-                </button>
+              <div className="flex items-center justify-between pt-3 border-t border-neutral-100 dark:border-neutral-800">
+                <div>
+                  {editingItem && (
+                    confirmDeleteItemInModal ? (
+                      <div className="flex items-center gap-1.5 animate-in fade-in">
+                        <span className="text-xs font-bold text-rose-600 dark:text-rose-400">確定刪除此行程？</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleDeleteItem(editingItem.id);
+                            resetForm();
+                            setToastMessage(`已刪除「${editingItem.title}」`);
+                            setTimeout(() => setToastMessage(null), 3000);
+                          }}
+                          className="px-2.5 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
+                        >
+                          確定刪除
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteItemInModal(false)}
+                          className="px-2 py-1 text-xs font-bold bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors cursor-pointer"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteItemInModal(true)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>刪除此行程</span>
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 dark:bg-neutral-800"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl text-xs font-bold bg-primary-600 hover:bg-primary-700 text-white shadow-sm"
+                  >
+                    儲存行程
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1148,13 +1460,43 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
 
-                        <button
-                          onClick={() => setDeleteConfirmId(item.id)}
-                          title="刪除"
-                          className="p-1.5 text-neutral-400 dark:text-neutral-600 hover:text-rose-600 rounded-lg hover:bg-rose-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {confirmDeleteItemId === item.id ? (
+                          <div className="flex items-center gap-1 animate-in fade-in zoom-in-95">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteItem(item.id);
+                                setConfirmDeleteItemId(null);
+                                setToastMessage(`已刪除「${item.title}」`);
+                                setTimeout(() => setToastMessage(null), 3000);
+                              }}
+                              className="px-2.5 py-1 text-[10px] font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-xs transition-colors cursor-pointer"
+                              title="確認刪除此項目"
+                            >
+                              確定刪除
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteItemId(null);
+                              }}
+                              className="px-2 py-1 text-[10px] font-bold bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 rounded-lg hover:bg-neutral-300 dark:hover:bg-neutral-600 transition-colors cursor-pointer"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteItemId(item.id)}
+                            title="刪除"
+                            className="p-1.5 text-neutral-400 dark:text-neutral-600 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1166,53 +1508,81 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
                     )}
                   </div>
 
-                  {/* Inter-Item Transport Connector */}
-                  {(item.transportOptions?.length ? item.transportOptions : (item.transportToNext ? [item.transportToNext] : [])).length > 0 && index < activeDay.items.length - 1 && (
-                    <div className="my-2 ml-4 flex flex-col gap-2">
-                      {(item.transportOptions?.length ? item.transportOptions : (item.transportToNext ? [item.transportToNext] : [])).map((transport, tIdx) => (
-                        <div key={tIdx} className="flex items-start gap-2 text-xs text-neutral-500 dark:text-neutral-500 font-medium">
-                          <div className="w-1.5 h-1.5 rounded-full bg-primary-400 mt-2 flex-shrink-0"></div>
-                          
-                          {transport.routes && transport.routes.length > 0 ? (
-                            <div className="flex flex-wrap gap-1.5">
-                              {transport.routes.map((route, i) => (
-                                <a
-                                  key={i}
-                                  href={route.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 px-2.5 py-1 rounded-full text-[11px] text-primary-700 dark:text-primary-400 flex items-center gap-1.5 border border-neutral-200 dark:border-neutral-700 transition-colors"
-                                  title={route.url}
-                                >
-                                  {transport.mode === 'subway' && '🚇'}
-                                  {transport.mode === 'walk' && '🚶'}
-                                  {transport.mode === 'bus' && '🚌'}
-                                  {transport.mode === 'taxi' && '🚕'}
-                                  {transport.mode === 'bullet_train' && '🚄'}
-                                  {transport.mode === 'car' && '🚗'}
-                                  <span className="font-bold">{route.label || '路線指引'}</span>
-                                  <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-70" />
-                                </a>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="bg-neutral-100 dark:bg-neutral-800 px-2.5 py-1 rounded-full text-[11px] text-neutral-600 dark:text-neutral-400 flex items-center gap-1.5 border border-neutral-200 dark:border-neutral-700">
-                              {transport.mode === 'subway' && '🚇 地鐵轉乘'}
-                              {transport.mode === 'walk' && '🚶 步行'}
-                              {transport.mode === 'bus' && '🚌 公車'}
-                              {transport.mode === 'taxi' && '🚕 計程車'}
-                              {transport.mode === 'bullet_train' && '🚄 特急鐵路'}
-                              {transport.mode === 'car' && '🚗 自駕 / 租車'}
-                              <span>約 {transport.durationMinutes} 分鐘</span>
-                              {transport.distanceText && (
-                                <span className="text-neutral-400 dark:text-neutral-600">({transport.distanceText})</span>
+                  {/* Inter-Item Transport Connector with Google Recommended Route */}
+                  {index < activeDay.items.length - 1 && (() => {
+                    const nextItem = activeDay.items[index + 1];
+                    const currentTransports =
+                      (item.transportOptions?.length
+                        ? item.transportOptions
+                        : item.transportToNext
+                        ? [item.transportToNext]
+                        : []);
+
+                    return (
+                      <div className="my-2.5 ml-4 flex flex-col gap-2">
+                        <div className="flex items-center gap-2 flex-wrap text-xs font-medium">
+                          <div className="w-1.5 h-1.5 rounded-full bg-primary-400 mt-0.5 flex-shrink-0" />
+
+                          {currentTransports.map((transport, tIdx) => (
+                            <React.Fragment key={tIdx}>
+                              {transport.routes && transport.routes.length > 0 ? (
+                                transport.routes.map((route, i) => (
+                                  <a
+                                    key={i}
+                                    href={route.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 px-2.5 py-1 rounded-full text-[11px] text-primary-700 dark:text-primary-400 flex items-center gap-1.5 border border-neutral-200 dark:border-neutral-700 transition-colors"
+                                    title={route.url}
+                                  >
+                                    {transport.mode === 'subway' && '🚇'}
+                                    {transport.mode === 'walk' && '🚶'}
+                                    {transport.mode === 'bus' && '🚌'}
+                                    {transport.mode === 'taxi' && '🚕'}
+                                    {transport.mode === 'bullet_train' && '🚄'}
+                                    {transport.mode === 'car' && '🚗'}
+                                    <span className="font-bold">{route.label || '路線指引'}</span>
+                                    <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-70" />
+                                  </a>
+                                ))
+                              ) : (
+                                <span className="bg-neutral-100 dark:bg-neutral-800 px-2.5 py-1 rounded-full text-[11px] text-neutral-600 dark:text-neutral-400 flex items-center gap-1.5 border border-neutral-200 dark:border-neutral-700">
+                                  {transport.mode === 'subway' && '🚇 地鐵轉乘'}
+                                  {transport.mode === 'walk' && '🚶 步行'}
+                                  {transport.mode === 'bus' && '🚌 公車'}
+                                  {transport.mode === 'taxi' && '🚕 計程車'}
+                                  {transport.mode === 'bullet_train' && '🚄 特急鐵路'}
+                                  {transport.mode === 'car' && '🚗 自駕 / 租車'}
+                                  <span>約 {transport.durationMinutes} 分鐘</span>
+                                  {transport.distanceText && (
+                                    <span className="text-neutral-400 dark:text-neutral-600">({transport.distanceText})</span>
+                                  )}
+                                </span>
                               )}
-                            </span>
-                          )}
+                            </React.Fragment>
+                          ))}
+
+                          {/* Google 推薦路線 Action Button */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setRouteModalPair({
+                                from: item,
+                                to: nextItem,
+                                fromItemId: item.id,
+                              })
+                            }
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:hover:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 transition-all shadow-2xs cursor-pointer group"
+                            title={`查看從「${item.locationName || item.title}」前往「${nextItem.locationName || nextItem.title}」的 Google 推薦路線與即時班次`}
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-500 group-hover:rotate-12 transition-transform" />
+                            <span>Google 推薦路線</span>
+                            <ChevronRight className="w-3 h-3 opacity-60 group-hover:translate-x-0.5 transition-transform" />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -1245,18 +1615,76 @@ export const ItineraryView: React.FC<ItineraryViewProps> = ({
         }}
       />
     
+      {/* Confirm Delete Day Modal */}
+      <ConfirmModal
+        isOpen={deleteConfirmDayNumber !== null}
+        title="確認刪除天數"
+        message={
+          deleteConfirmDayNumber !== null
+            ? `確定要刪除「第 ${deleteConfirmDayNumber} 天 (${trip.days.find(d => d.dayNumber === deleteConfirmDayNumber)?.date || ''})」嗎？當天包含的 ${trip.days.find(d => d.dayNumber === deleteConfirmDayNumber)?.items.length || 0} 個行程項目與交通設定都將被刪除，此操作無法復原。`
+            : ''
+        }
+        onConfirm={() => {
+          if (deleteConfirmDayNumber !== null) {
+            handleRemoveDay(deleteConfirmDayNumber);
+            setDeleteConfirmDayNumber(null);
+            triggerToast(`已刪除第 ${deleteConfirmDayNumber} 天`);
+          }
+        }}
+        onCancel={() => setDeleteConfirmDayNumber(null)}
+      />
+
+      {/* Confirm Delete Item Modal */}
       <ConfirmModal
         isOpen={!!deleteConfirmId}
-        title="確認刪除"
-        message="您確定要刪除此項目嗎？此操作無法復原。"
+        title="確認刪除行程項目"
+        message={(() => {
+          const targetItem = activeDay?.items.find(it => it.id === deleteConfirmId);
+          return targetItem
+            ? `確定要刪除「${targetItem.title}」(${targetItem.time}) 嗎？此操作無法復原。`
+            : '您確定要刪除此項目嗎？此操作無法復原。';
+        })()}
         onConfirm={() => {
           if (deleteConfirmId) {
             handleDeleteItem(deleteConfirmId);
             setDeleteConfirmId(null);
+            triggerToast('已刪除行程項目');
           }
         }}
         onCancel={() => setDeleteConfirmId(null)}
       />
+
+      {/* Google Route Modal */}
+      {routeModalPair && (
+        <GoogleRouteModal
+          isOpen={Boolean(routeModalPair)}
+          onClose={() => setRouteModalPair(null)}
+          fromItem={routeModalPair.from}
+          toItem={routeModalPair.to}
+          destinationCity={trip.destination}
+          onApplyRoute={handleApplyGoogleRoute}
+        />
+      )}
+
+      {/* Reorder Days Modal */}
+      <ReorderDaysModal
+        isOpen={isReorderDaysModalOpen}
+        onClose={() => setIsReorderDaysModalOpen(false)}
+        trip={trip}
+        onSaveTrip={(updated) => {
+          onUpdateTrip(updated);
+          triggerToast('✨ 行程天數順序已成功更新！');
+        }}
+        onSelectDay={onSelectDay}
+      />
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-neutral-900/95 dark:bg-neutral-800 text-white px-4 py-2.5 rounded-2xl shadow-xl text-xs font-bold flex items-center gap-2 border border-neutral-700/50 backdrop-blur-xs animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 };

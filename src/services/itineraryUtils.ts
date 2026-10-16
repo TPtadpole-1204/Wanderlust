@@ -233,3 +233,99 @@ export function moveItineraryItemOrder(
 
   return cloned;
 }
+
+/**
+ * Reorders days in a trip from fromIndex to toIndex (e.g. via drag-and-drop),
+ * maintaining chronological dates and re-indexing dayNumbers (1..N).
+ */
+export function reorderDaysInTrip(trip: Trip, fromIndex: number, toIndex: number): Trip {
+  if (
+    fromIndex < 0 ||
+    fromIndex >= trip.days.length ||
+    toIndex < 0 ||
+    toIndex >= trip.days.length ||
+    fromIndex === toIndex
+  ) {
+    return trip;
+  }
+
+  const clonedDays = [...trip.days];
+  const [movedDay] = clonedDays.splice(fromIndex, 1);
+  clonedDays.splice(toIndex, 0, movedDay);
+
+  const startStr = trip.startDate || clonedDays[0]?.date || formatDateStr(new Date());
+  const updatedDays: DayPlan[] = clonedDays.map((day, idx) => ({
+    ...day,
+    dayNumber: idx + 1,
+    date: addDaysToDateStr(startStr, idx),
+  }));
+
+  return {
+    ...trip,
+    days: updatedDays,
+  };
+}
+
+/**
+ * Swaps two specific days in a trip by day numbers,
+ * preserving chronological dates and sequential dayNumber.
+ */
+export function swapTwoDaysInTrip(trip: Trip, dayNumA: number, dayNumB: number): Trip {
+  if (dayNumA === dayNumB) return trip;
+  const idxA = trip.days.findIndex((d) => d.dayNumber === dayNumA);
+  const idxB = trip.days.findIndex((d) => d.dayNumber === dayNumB);
+  if (idxA === -1 || idxB === -1) return trip;
+
+  const clonedDays = [...trip.days];
+  const temp = clonedDays[idxA];
+  clonedDays[idxA] = clonedDays[idxB];
+  clonedDays[idxB] = temp;
+
+  const startStr = trip.startDate || clonedDays[0]?.date || formatDateStr(new Date());
+  const updatedDays: DayPlan[] = clonedDays.map((day, idx) => ({
+    ...day,
+    dayNumber: idx + 1,
+    date: addDaysToDateStr(startStr, idx),
+  }));
+
+  return {
+    ...trip,
+    days: updatedDays,
+  };
+}
+
+/**
+ * Moves an itinerary item from one day to another day
+ */
+export function moveItemToAnotherDay(
+  trip: Trip,
+  itemId: string,
+  fromDayNum: number,
+  toDayNum: number
+): Trip {
+  if (fromDayNum === toDayNum) return trip;
+  const fromDay = trip.days.find((d) => d.dayNumber === fromDayNum);
+  const toDay = trip.days.find((d) => d.dayNumber === toDayNum);
+  if (!fromDay || !toDay) return trip;
+
+  const itemToMove = fromDay.items.find((it) => it.id === itemId);
+  if (!itemToMove) return trip;
+
+  const newFromItems = fromDay.items.filter((it) => it.id !== itemId);
+  const newToItems = [...toDay.items, itemToMove].sort((a, b) => a.time.localeCompare(b.time));
+
+  const updatedDays = trip.days.map((day) => {
+    if (day.dayNumber === fromDayNum) {
+      return { ...day, items: newFromItems };
+    }
+    if (day.dayNumber === toDayNum) {
+      return { ...day, items: newToItems };
+    }
+    return day;
+  });
+
+  return {
+    ...trip,
+    days: updatedDays,
+  };
+}

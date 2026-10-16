@@ -10,13 +10,19 @@ import {
   Compass,
   Check,
   Sparkles,
-  Trash2, ChevronDown
+  Trash2,
+  ChevronDown,
+  Download,
+  Copy,
+  CheckCheck,
 } from 'lucide-react';
 import { POPULAR_CURRENCIES } from '../services/storage';
 import { AutocompleteInput } from './AutocompleteInput';
 import { CurrencyDropdown } from './CurrencyDropdown';
 import { CustomDatePicker } from './CustomDateTimePicker';
 import { syncTripDatesAndDays, addDaysToDateStr } from '../services/itineraryUtils';
+import { AI_PROMPT_INSTRUCTION, parseAndValidateAIImport } from '../services/aiImportService';
+import { exportSingleTrip } from '../services/importExport';
 
 interface TripSettingsModalProps {
   initialTab?: 'edit' | 'switch' | 'create' | 'aiImport';
@@ -111,6 +117,8 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
 
   // AI Import state
   const [aiJsonStr, setAiJsonStr] = useState('');
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -216,48 +224,17 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
   };
 
   const handleImportAIJson = () => {
-    try {
-      const parsed = JSON.parse(aiJsonStr);
-      if (!parsed.title || !Array.isArray(parsed.days)) {
-        alert('無效的行程格式，請確認包含 title 與 days 陣列。');
-        return;
-      }
-      
-      const newTrip: Trip = {
-        id: `trip-${Date.now()}`,
-        title: parsed.title,
-        destination: parsed.destination || '未指定',
-        countryCode: parsed.countryCode || 'JP',
-        startDate: parsed.startDate || '2025-01-01',
-        endDate: parsed.endDate || '2025-01-05',
-        coverImage: parsed.coverImage || 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80',
-        baseCurrency: parsed.baseCurrency || 'TWD',
-        targetCurrency: parsed.targetCurrency || 'JPY',
-        totalBudget: parsed.totalBudget || 50000,
-        shareCode: `TRIP-${Math.floor(1000 + Math.random() * 9000)}`,
-        offlineReady: false,
-        collaborators: trip.collaborators, // keep current user
-        flights: parsed.flights || [],
-        attractions: parsed.attractions || [],
-        expenses: parsed.expenses || [],
-        days: parsed.days.map((d: any, i: number) => ({
-          id: `day-${Date.now()}-${i}`,
-          dayNumber: d.dayNumber || i + 1,
-          date: d.date || `2025-01-0${i + 1}`,
-          themeTitle: d.themeTitle || `第 ${i + 1} 天`,
-          items: d.items?.map((item: any, j: number) => ({
-            ...item,
-            id: `item-${Date.now()}-${i}-${j}`
-          })) || []
-        })),
-      };
-
-      onCreateNewTrip(newTrip);
-      setAiJsonStr('');
-      onClose();
-    } catch (err) {
-      alert('JSON 解析失敗，請確認格式是否為正確的 JSON 格式。');
+    setImportError(null);
+    const result = parseAndValidateAIImport(aiJsonStr, trip.collaborators);
+    if (!result.success || !result.trip) {
+      setImportError(result.error || '匯入失敗，請確認 JSON 格式。');
+      return;
     }
+
+    onCreateNewTrip(result.trip);
+    setAiJsonStr('');
+    setImportError(null);
+    onClose();
   };
 
   return (
@@ -469,50 +446,60 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {st.id === trip.id && (
-                      <span className="p-1 bg-primary-600 text-white rounded-full">
-                        <Check className="w-3.5 h-3.5" />
-                      </span>
-                    )}
-                    {confirmDeleteId === st.id ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDeleteTrip(st.id);
-                            setConfirmDeleteId(null);
-                          }}
-                          className="px-2 py-1 text-[10px] font-bold bg-red-500 text-white rounded shadow-sm hover:bg-red-600"
-                        >
-                          確定刪除
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConfirmDeleteId(null);
-                          }}
-                          className="px-2 py-1 text-[10px] font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
-                        >
-                          取消
-                        </button>
-                      </div>
-                    ) : (
+                    <div className="flex items-center gap-1.5">
+                      {st.id === trip.id && (
+                        <span className="p-1 bg-primary-600 text-white rounded-full">
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setConfirmDeleteId(st.id);
+                          exportSingleTrip(st);
                         }}
-                        className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-                        title="刪除旅程"
+                        className="p-2 text-neutral-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/30 rounded-lg transition-colors"
+                        title="匯出此行程為 JSON 檔"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Download className="w-4 h-4" />
                       </button>
-                    )}
+                      {confirmDeleteId === st.id ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteTrip(st.id);
+                              setConfirmDeleteId(null);
+                            }}
+                            className="px-2 py-1 text-[10px] font-bold bg-red-500 text-white rounded shadow-sm hover:bg-red-600"
+                          >
+                            確定刪除
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteId(null);
+                            }}
+                            className="px-2 py-1 text-[10px] font-bold bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 rounded hover:bg-neutral-300 dark:hover:bg-neutral-700"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteId(st.id);
+                          }}
+                          className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                          title="刪除旅程"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -545,71 +532,123 @@ export const TripSettingsModal: React.FC<TripSettingsModalProps> = ({
 
           {activeTab === 'aiImport' && (
             <div className="space-y-4">
-              <div className="bg-primary-50/50 p-4 rounded-xl border border-primary-100 text-xs text-primary-900 space-y-2 leading-relaxed">
-                <p className="font-bold flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-primary-600" />
-                  <span>透過第三方 AI (如 ChatGPT, Claude) 匯入</span>
+              <div className="bg-primary-50/50 dark:bg-primary-950/20 p-4 rounded-xl border border-primary-200 dark:border-primary-800 text-xs text-primary-900 dark:text-primary-200 space-y-2.5 leading-relaxed">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <p className="font-bold flex items-center gap-1.5 text-sm">
+                    <Sparkles className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                    <span>透過第三方 AI (ChatGPT, Claude, Gemini) 匯入</span>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const match = AI_PROMPT_INSTRUCTION.match(/```json\s*([\s\S]*?)\s*```/);
+                        if (match && match[1]) {
+                          setAiJsonStr(match[1].trim());
+                          setImportError(null);
+                        }
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 shadow-xs cursor-pointer"
+                    >
+                      載入示範資料
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(AI_PROMPT_INSTRUCTION);
+                        setCopiedPrompt(true);
+                        setTimeout(() => setCopiedPrompt(false), 2000);
+                      }}
+                      className="px-2.5 py-1 text-[11px] font-bold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-all flex items-center gap-1 shadow-xs cursor-pointer"
+                    >
+                      {copiedPrompt ? (
+                        <>
+                          <CheckCheck className="w-3.5 h-3.5 text-emerald-300" />
+                          <span>已複製 AI 提示詞！</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>複製完整 AI 提示詞</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-neutral-600 dark:text-neutral-400">
+                  複製上方完整提示詞給任何 AI 助手，對方將輸出包含<strong>住宿資訊、交通建議（含 Google Maps 路線）、行前清單、航班與景點</strong>的標準 JSON。貼上即可一鍵建立！
                 </p>
-                <p>您可以先與其他 AI 助手規劃行程，並要求對方嚴格輸出以下 JSON 結構，複製貼上即可一鍵匯入為新旅程：</p>
-                <div className="relative group mt-2">
-                  <pre className="p-3 bg-neutral-900 text-primary-300 rounded-lg overflow-x-auto text-[10px] font-mono leading-normal">
+
+                <div className="relative group mt-1">
+                  <pre className="p-3 bg-neutral-900 text-primary-300 rounded-lg overflow-x-auto text-[10px] font-mono leading-normal max-h-40">
 {`{
-  "title": "我的 AI 規劃行程",
-  "destination": "東京",
-  "baseCurrency": "TWD",
-  "targetCurrency": "JPY",
+  "title": "東京秋季楓葉與美食 5 天 4 夜",
+  "destination": "日本 東京 (Tokyo, Japan)",
+  "countryCode": "JP",
+  "startDate": "2025-10-15",
+  "endDate": "2025-10-19",
   "totalBudget": 50000,
-  "flights": [
-    {
-      "id": "flight-1",
-      "flightNumber": "BR192",
-      "airline": "EVA Air",
-      "departureCity": "台北 (Taipei)",
-      "departureAirport": "TSA",
-      "arrivalCity": "東京 (Tokyo)",
-      "arrivalAirport": "HND",
-      "departureTime": "07:30",
-      "arrivalTime": "11:45"
-    }
-  ],
-  "attractions": [
-    {
-      "id": "att-1",
-      "title": "東京鐵塔",
-      "address": "東京都港區芝公園4丁目2-8",
-      "category": "sightseeing",
-      "tags": ["夜景", "必去", "打卡"],
-      "imageUrl": "https://images.unsplash.com/photo-1542931287-023b922fa89b",
-      "isWishlist": true,
-      "hours": "09:00 - 23:00",
-      "notes": "記得提前買票"
-    }
-  ],
+  "notes": "全旅程行前必讀須知、交通票券建議",
+  "checklist": [{ "category": "重要證件", "label": "護照", "checked": false }],
+  "flights": [{ "flightNumber": "JX800", "departureCity": "台北", "arrivalCity": "東京" }],
   "days": [
     {
       "dayNumber": 1,
-      "themeTitle": "淺草文化之旅",
+      "date": "2025-10-15",
+      "themeTitle": "抵達東京與新宿繁華夜景",
+      "accommodation": {
+        "name": "新宿燦路都廣場大飯店",
+        "address": "東京都渋谷区代々木2-3-1",
+        "phone": "+81 3-3375-3211",
+        "checkInTime": "15:00"
+      },
       "items": [
         {
-          "title": "雷門",
-          "time": "10:00",
-          "category": "sightseeing"
+          "time": "13:30",
+          "endTime": "14:45",
+          "title": "成田特快 N'EX 前往新宿",
+          "category": "transport",
+          "locationName": "成田機場第2航廈站",
+          "transportToNext": {
+            "mode": "bullet_train",
+            "durationMinutes": 65,
+            "routes": [{ "label": "Google 推薦鐵路", "url": "https://www.google.com/maps/..." }]
+          }
         }
       ]
     }
-  ]
+  ],
+  "attractions": [{ "title": "東京鐵塔", "category": "sightseeing" }]
 }`}
                   </pre>
                 </div>
               </div>
 
+              {importError && (
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300 flex items-center justify-between animate-in fade-in">
+                  <span>{importError}</span>
+                  <button
+                    onClick={() => setImportError(null)}
+                    className="p-1 hover:bg-red-100 rounded text-red-500 font-bold"
+                  >
+                    關閉
+                  </button>
+                </div>
+              )}
+
               <div>
-                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-2">貼上 AI 產生的 JSON</label>
+                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-2">
+                  貼上 AI 產生的 JSON 內容（支援 Markdown 程式碼區塊）
+                </label>
                 <textarea
                   rows={8}
-                  placeholder="請在此貼上 JSON 程式碼..."
+                  placeholder="請在此貼上 AI 回覆的 JSON 程式碼 (例如 ```json ... ```)..."
                   value={aiJsonStr}
-                  onChange={(e) => setAiJsonStr(e.target.value)}
+                  onChange={(e) => {
+                    setAiJsonStr(e.target.value);
+                    if (importError) setImportError(null);
+                  }}
                   className="w-full px-3.5 py-3 rounded-xl border border-neutral-300 dark:border-neutral-600 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 bg-neutral-50 dark:bg-neutral-950"
                 />
               </div>

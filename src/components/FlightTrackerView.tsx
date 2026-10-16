@@ -503,6 +503,7 @@ export const FlightTrackerView: React.FC<FlightTrackerViewProps> = ({
                     value={depTime}
                     onChange={setDepTime}
                     placeholder="選擇起飛日期"
+                    fineTuneOnly
                   />
                 </div>
               </div>
@@ -573,6 +574,7 @@ export const FlightTrackerView: React.FC<FlightTrackerViewProps> = ({
                     value={arrTime}
                     onChange={setArrTime}
                     placeholder="選擇抵達日期"
+                    fineTuneOnly
                   />
                 </div>
               </div>

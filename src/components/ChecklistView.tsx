@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Trip, ChecklistItem, HotelInfo } from '../types';
-import { CheckSquare, Square, Plus, Trash2, Home, MapPin, Phone, FileText, ChevronDown } from 'lucide-react';
+import { CheckSquare, Square, Plus, Trash2, Home, MapPin, Phone, FileText, ChevronDown, Link2, Sparkles, Loader2 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { AutocompleteInput } from './AutocompleteInput';
+import { resolveAndEnrichGoogleMapsInput } from '../services/googleMapsParser';
 
 interface Props {
   trip: Trip;
@@ -26,9 +27,42 @@ export const ChecklistView: React.FC<Props> = ({ trip, onUpdateTrip }) => {
 
   const [newItemCategory, setNewItemCategory] = useState('其他物品');
   const [customCategory, setCustomCategory] = useState("");
+
+  // Google Maps Hotel Import State
+  const [hotelGmapInput, setHotelGmapInput] = useState('');
+  const [isParsingHotelGmap, setIsParsingHotelGmap] = useState(false);
+  const [hotelGmapFeedback, setHotelGmapFeedback] = useState<string | null>(null);
     
   const checklist = trip.checklist || DEFAULT_CHECKLIST;
   const hotel = trip.firstNightHotel || { name: '', address: '', phone: '', bookingRef: '' };
+
+  const handleImportHotelFromGmap = async () => {
+    if (!hotelGmapInput.trim()) return;
+    setIsParsingHotelGmap(true);
+    setHotelGmapFeedback(null);
+    const defaultCity = trip.destination.split(' ')[0] || '東京';
+    try {
+      const enriched = await resolveAndEnrichGoogleMapsInput(hotelGmapInput.trim(), defaultCity);
+      const updatedHotel: HotelInfo = {
+        name: enriched.title || hotel.name,
+        address: enriched.address || hotel.address,
+        phone: enriched.phone || hotel.phone,
+        bookingRef: hotel.bookingRef,
+      };
+      onUpdateTrip({
+        ...trip,
+        firstNightHotel: updatedHotel,
+      });
+      setHotelGmapFeedback(`✓ 已帶入「${updatedHotel.name}」`);
+      setHotelGmapInput('');
+      setTimeout(() => setHotelGmapFeedback(null), 4000);
+    } catch {
+      setHotelGmapFeedback('⚠️ 無法解析此網址');
+      setTimeout(() => setHotelGmapFeedback(null), 4000);
+    } finally {
+      setIsParsingHotelGmap(false);
+    }
+  };
 
   const handleToggleItem = (id: string) => {
     const updated = checklist.map(item => item.id === id ? { ...item, checked: !item.checked } : item);
@@ -122,8 +156,53 @@ export const ChecklistView: React.FC<Props> = ({ trip, onUpdateTrip }) => {
               <h3 className="font-bold text-emerald-800 dark:text-emerald-400">第一晚住宿資訊 (入境必填)</h3>
             </div>
             <div className="p-4 space-y-4">
-              <p className="text-xs text-neutral-500 dark:text-neutral-500 mb-2">填寫入境卡或電子通關 (如 Visit Japan Web 或 K-ETA) 時需要填寫第一晚的聯絡資訊。</p>
-              
+              <p className="text-xs text-neutral-500 dark:text-neutral-500 mb-2">
+                填寫入境卡或電子通關 (如 Visit Japan Web 或 K-ETA) 時需要填寫第一晚的聯絡資訊。
+              </p>
+
+              {/* Google Maps quick auto-import box */}
+              <div className="p-3 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                    <Link2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>貼上 Google 地圖飯店網址自動帶入</span>
+                  </div>
+                  {hotelGmapFeedback && (
+                    <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      {hotelGmapFeedback}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="貼上飯店的 Google Maps 網址或手機分享文字..."
+                    value={hotelGmapInput}
+                    onChange={(e) => setHotelGmapInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleImportHotelFromGmap();
+                      }
+                    }}
+                    className="flex-1 px-3 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-neutral-900 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={!hotelGmapInput.trim() || isParsingHotelGmap}
+                    onClick={handleImportHotelFromGmap}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold whitespace-nowrap transition-all cursor-pointer"
+                  >
+                    {isParsingHotelGmap ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isParsingHotelGmap ? '解析中...' : '自動帶入'}</span>
+                  </button>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1">飯店名稱</label>
                 <div className="relative">

@@ -85,6 +85,7 @@ export interface AttractionBookmark {
   imageUrl: string;
   tags: string[];
   isWishlist: boolean;
+  googleMapsUrl?: string;
 }
 
 export interface FlightInfo {

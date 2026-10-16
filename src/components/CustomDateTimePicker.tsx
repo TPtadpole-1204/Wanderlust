@@ -121,7 +121,7 @@ export const CustomDatePicker: React.FC<CustomDatePickerProps> = ({
       {isOpen && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute z-50 mt-2 left-0 w-72 bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-700 p-4 animate-in fade-in zoom-in-95 duration-150 text-neutral-900 dark:text-white"
+          className="absolute z-[70] mt-2 left-0 w-72 bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-700 p-4 animate-in fade-in zoom-in-95 duration-150 text-neutral-900 dark:text-white"
         >
           {/* Header */}
           <div className="flex items-center justify-between mb-3 pb-2 border-b border-neutral-100 dark:border-neutral-800">
@@ -231,13 +231,8 @@ interface CustomTimePickerProps {
   placeholder?: string;
   isClearable?: boolean;
   className?: string;
+  fineTuneOnly?: boolean;
 }
-
-const QUICK_TIMES = [
-  { label: '早上', times: ['07:00', '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30'] },
-  { label: '中午 / 下午', times: ['12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30'] },
-  { label: '晚上 / 夜間', times: ['18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00'] },
-];
 
 export const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
   value,
@@ -248,23 +243,50 @@ export const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hourColumnRef = useRef<HTMLDivElement>(null);
+  const minuteColumnRef = useRef<HTMLDivElement>(null);
 
   const [selectedHour, setSelectedHour] = useState<string>(() => {
-    if (value && value.includes(':')) return value.split(':')[0];
+    if (value && value.includes(':')) return value.split(':')[0].padStart(2, '0');
     return '10';
   });
   const [selectedMinute, setSelectedMinute] = useState<string>(() => {
-    if (value && value.includes(':')) return value.split(':')[1];
+    if (value && value.includes(':')) return value.split(':')[1].padStart(2, '0');
     return '00';
+  });
+
+  // minute display mode: 5-minute multiples vs all 00-59
+  const [minuteViewMode, setMinuteViewMode] = useState<'5min' | 'all'>(() => {
+    const minNum = parseInt(selectedMinute, 10);
+    return minNum % 5 === 0 ? '5min' : 'all';
   });
 
   useEffect(() => {
     if (value && value.includes(':')) {
       const [h, m] = value.split(':');
-      setSelectedHour(h.padStart(2, '0'));
-      setSelectedMinute(m.padStart(2, '0'));
+      const padH = h.padStart(2, '0');
+      const padM = m.padStart(2, '0');
+      setSelectedHour(padH);
+      setSelectedMinute(padM);
+      if (parseInt(padM, 10) % 5 !== 0) {
+        setMinuteViewMode('all');
+      }
     }
-  }, [value, isOpen]);
+  }, [value]);
+
+  // Auto-scroll selected elements into view when opening
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        const activeHour = hourColumnRef.current?.querySelector('[data-selected="true"]');
+        activeHour?.scrollIntoView({ block: 'center', behavior: 'auto' });
+
+        const activeMin = minuteColumnRef.current?.querySelector('[data-selected="true"]');
+        activeMin?.scrollIntoView({ block: 'center', behavior: 'auto' });
+      }, 30);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, minuteViewMode]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -279,7 +301,10 @@ export const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
   }, [isOpen]);
 
   const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
-  const minutes = ['00', '15', '30', '45'];
+  const fiveMinutes = ['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'];
+  const allMinutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+  const displayedMinutes = minuteViewMode === '5min' ? fiveMinutes : allMinutes;
 
   const getPeriodLabel = (timeStr: string) => {
     if (!timeStr || !timeStr.includes(':')) return '';
@@ -289,6 +314,37 @@ export const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
     if (h === 12) return '中午';
     if (h < 18) return '下午';
     return '晚上';
+  };
+
+  const handleSetTime = (newH: string, newM: string) => {
+    setSelectedHour(newH);
+    setSelectedMinute(newM);
+    onChange(`${newH}:${newM}`);
+  };
+
+  const handleAdjustMinutes = (delta: number) => {
+    const curH = parseInt(selectedHour || '10', 10);
+    const curM = parseInt(selectedMinute || '00', 10);
+    let total = curH * 60 + curM + delta;
+    if (total < 0) total += 24 * 60;
+    total = total % (24 * 60);
+
+    const h = String(Math.floor(total / 60)).padStart(2, '0');
+    const m = String(total % 60).padStart(2, '0');
+    if (parseInt(m, 10) % 5 !== 0) {
+      setMinuteViewMode('all');
+    }
+    handleSetTime(h, m);
+  };
+
+  const handleSetCurrentTime = () => {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    if (parseInt(m, 10) % 5 !== 0) {
+      setMinuteViewMode('all');
+    }
+    handleSetTime(h, m);
   };
 
   return (
@@ -332,100 +388,151 @@ export const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
       {isOpen && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute z-50 mt-2 left-0 w-72 sm:w-80 bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-700 p-4 animate-in fade-in zoom-in-95 duration-150 text-neutral-900 dark:text-white space-y-3"
+          className="absolute z-[70] mt-2 left-0 w-72 sm:w-80 bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-700 p-3.5 animate-in fade-in zoom-in-95 duration-150 text-neutral-900 dark:text-white space-y-3"
         >
+          {/* Header */}
           <div className="flex items-center justify-between pb-2 border-b border-neutral-100 dark:border-neutral-800">
-            <span className="text-xs font-bold text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-primary-600" />
-              <span>選擇時段與時間</span>
+            <span className="text-xs font-bold text-neutral-700 dark:text-neutral-300 flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+              <span>精確微調時間</span>
             </span>
-            <span className="font-mono text-xs font-black text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-950/60 px-2 py-0.5 rounded-md">
-              {selectedHour}:{selectedMinute}
-            </span>
+
+            {/* Live Time Badge */}
+            <div className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary-50 dark:bg-primary-950/70 text-primary-700 dark:text-primary-300 font-mono text-xs font-black">
+              <span>{selectedHour}:{selectedMinute}</span>
+              <span className="text-[10px] font-sans font-bold text-primary-600/80">
+                ({getPeriodLabel(`${selectedHour}:${selectedMinute}`)})
+              </span>
+            </div>
           </div>
 
-          {/* Quick Period Chips */}
-          <div className="space-y-2 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
-            {QUICK_TIMES.map((group) => (
-              <div key={group.label}>
-                <div className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 mb-1">
-                  {group.label}
+          {/* Precision Fine-Tuning UI */}
+          <div className="space-y-2.5">
+            {/* Stepper Buttons */}
+            <div className="flex items-center justify-between gap-1 text-[11px] font-bold">
+              <span className="text-[10px] text-neutral-400 dark:text-neutral-500">快速微調：</span>
+              <div className="flex items-center gap-1">
+                {[-15, -5, -1, 1, 5, 15].map((delta) => (
+                  <button
+                    key={delta}
+                    type="button"
+                    onClick={() => handleAdjustMinutes(delta)}
+                    className="px-1.5 py-0.5 rounded-md bg-neutral-100 dark:bg-neutral-800 hover:bg-primary-50 dark:hover:bg-primary-950/60 hover:text-primary-600 text-neutral-600 dark:text-neutral-300 font-mono text-[10px] transition-colors cursor-pointer"
+                    title={`微調 ${delta > 0 ? `+${delta}` : delta} 分鐘`}
+                  >
+                    {delta > 0 ? `+${delta}` : delta}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Dual Scrollable Column Selector */}
+            <div className="grid grid-cols-2 gap-2 bg-neutral-50 dark:bg-neutral-950/70 p-2 rounded-xl border border-neutral-200 dark:border-neutral-800">
+              {/* Hours Column */}
+              <div>
+                <div className="text-[10px] font-black text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-1 px-1">
+                  時 (00 ~ 23)
                 </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {group.times.map((t) => {
-                    const isSelected = value === t;
+                <div
+                  ref={hourColumnRef}
+                  className="max-h-48 overflow-y-auto space-y-1 p-1 pr-1.5 scrollbar-thin"
+                >
+                  {hours.map((h) => {
+                    const isSelected = selectedHour === h;
                     return (
                       <button
-                        key={t}
+                        key={h}
                         type="button"
-                        onClick={() => {
-                          onChange(t);
-                          setIsOpen(false);
-                        }}
-                        className={`py-1.5 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer ${
+                        data-selected={isSelected}
+                        onClick={() => handleSetTime(h, selectedMinute)}
+                        className={`w-full py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-between transition-all cursor-pointer ${
                           isSelected
-                            ? 'bg-primary-600 text-white shadow-xs'
-                            : 'bg-neutral-50 dark:bg-neutral-800/80 text-neutral-700 dark:text-neutral-300 hover:bg-primary-50 dark:hover:bg-primary-950/40 hover:text-primary-600'
+                            ? 'bg-primary-600 text-white shadow-xs font-black'
+                            : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/70 dark:hover:bg-neutral-800'
                         }`}
                       >
-                        {t}
+                        <span>{h} 時</span>
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
                       </button>
                     );
                   })}
                 </div>
               </div>
-            ))}
+
+              {/* Minutes Column */}
+              <div>
+                <div className="flex items-center justify-between text-[10px] font-black text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-1 px-1">
+                  <span>分 (MIN)</span>
+                  <button
+                    type="button"
+                    onClick={() => setMinuteViewMode(minuteViewMode === '5min' ? 'all' : '5min')}
+                    className="text-[9px] font-bold text-primary-600 dark:text-primary-400 hover:underline cursor-pointer lowercase"
+                  >
+                    {minuteViewMode === '5min' ? '切換全部0-59' : '切換每5分'}
+                  </button>
+                </div>
+                <div
+                  ref={minuteColumnRef}
+                  className="max-h-48 overflow-y-auto space-y-1 p-1 pr-1.5 scrollbar-thin"
+                >
+                  {displayedMinutes.map((m) => {
+                    const isSelected = selectedMinute === m;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        data-selected={isSelected}
+                        onClick={() => handleSetTime(selectedHour, m)}
+                        className={`w-full py-1.5 px-2 rounded-lg text-xs font-mono font-bold flex items-center justify-between transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary-600 text-white shadow-xs font-black'
+                            : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/70 dark:hover:bg-neutral-800'
+                        }`}
+                      >
+                        <span>{m} 分</span>
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Custom Hour & Minute Selector */}
-          <div className="pt-2.5 border-t border-neutral-100 dark:border-neutral-800">
-            <div className="text-[10px] font-bold text-neutral-400 dark:text-neutral-500 mb-1.5">
-              精確微調 (時 : 分)
-            </div>
+          {/* Footer */}
+          <div className="pt-2 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
-              <select
-                value={selectedHour}
-                onChange={(e) => {
-                  const h = e.target.value;
-                  setSelectedHour(h);
-                  onChange(`${h}:${selectedMinute}`);
-                }}
-                className="flex-1 px-2.5 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                {hours.map((h) => (
-                  <option key={h} value={h}>
-                    {h} 時
-                  </option>
-                ))}
-              </select>
-              <span className="font-bold text-neutral-400">:</span>
-              <select
-                value={selectedMinute}
-                onChange={(e) => {
-                  const m = e.target.value;
-                  setSelectedMinute(m);
-                  onChange(`${selectedHour}:${m}`);
-                }}
-                className="flex-1 px-2.5 py-1.5 rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-xs font-mono font-bold focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                {minutes.map((m) => (
-                  <option key={m} value={m}>
-                    {m} 分
-                  </option>
-                ))}
-              </select>
               <button
                 type="button"
-                onClick={() => {
-                  onChange(`${selectedHour}:${selectedMinute}`);
-                  setIsOpen(false);
-                }}
-                className="px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
+                onClick={handleSetCurrentTime}
+                className="text-primary-600 dark:text-primary-400 font-bold hover:underline cursor-pointer text-[11px]"
               >
-                <Check className="w-3.5 h-3.5" />
-                確定
+                現在時間
               </button>
+              {isClearable && value && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange('');
+                    setIsOpen(false);
+                  }}
+                  className="text-neutral-500 hover:text-red-500 font-bold hover:underline cursor-pointer text-[11px]"
+                >
+                  清除
+                </button>
+              )}
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                handleSetTime(selectedHour, selectedMinute);
+                setIsOpen(false);
+              }}
+              className="px-3.5 py-1.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              <Check className="w-3.5 h-3.5" />
+              確定
+            </button>
           </div>
         </div>
       )}
@@ -438,6 +545,7 @@ interface CustomDateTimePickerProps {
   onChange: (dateTimeStr: string) => void;
   placeholder?: string;
   className?: string;
+  fineTuneOnly?: boolean;
 }
 
 export const CustomDateTimePicker: React.FC<CustomDateTimePickerProps> = ({
@@ -445,6 +553,7 @@ export const CustomDateTimePicker: React.FC<CustomDateTimePickerProps> = ({
   onChange,
   placeholder = '選擇日期與時間',
   className = '',
+  fineTuneOnly = true,
 }) => {
   const parts = value ? value.trim().split(' ') : [];
   const datePart = parts[0] && /^\d{4}-\d{2}-\d{2}$/.test(parts[0]) ? parts[0] : formatDateStr(new Date());
@@ -462,6 +571,7 @@ export const CustomDateTimePicker: React.FC<CustomDateTimePickerProps> = ({
       <CustomTimePicker
         value={value ? timePart : ''}
         placeholder="選擇時間"
+        fineTuneOnly={fineTuneOnly}
         onChange={(newTime) => {
           onChange(`${datePart} ${newTime || '09:00'}`);
         }}
